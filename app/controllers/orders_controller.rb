@@ -1,6 +1,57 @@
 class OrdersController < ApplicationController
+  # 注文履歴一覧
+  def index
+    @orders = current_user.orders # ログインしているユーザーの注文一覧を取得
+  end
+
+  # 注文画面
   def new
-    @order = Order.new   # 新しい注文オブジェクトを作成
+    @order = Order.new 
     @product = Product.find(params[:product_id])   # URLから商品を取得
+  end
+  
+  # 注文内容の確認画面
+  def confirm
+    @order = Order.new(order_params)          # フォームから送信された注文情報を取得
+    @product = Product.find(order_params[:product_id]) # 注文対象の商品を取得
+    
+    # 【追加】バリデーションチェックの前にログインユーザーを紐付ける
+    @order.user = current_user 
+
+    if @order.valid?
+        @order.total_price = cal_total_price(@product.price, @order.count) # 合計金額を計算して設定
+    else
+      # バリデーションNGなら入力画面に戻る（@productの再取得も行う）
+      render :new and return
+    end
+  end
+  
+  # 注文登録
+  def create
+    @order = Order.new(order_params)
+    @order.user_id = current_user.id # ログイン中のユーザーIDを紐付け
+    # 注文が正常に保存できた場合
+    if @order.save
+      redirect_to complete_order_path(@order)     # 登録が完了したら注文完了ページへ遷移
+    else
+      @product = Product.find(@order.product_id)
+      render :new and return # または入力画面へrenderする形に整える
+    end
+  end
+
+  # 注文完了
+  def complete
+    @order = Order.find(params[:id])
+    @product = Product.find(@order.product_id)
+  end
+
+  private
+  
+  def order_params
+    params.require(:order).permit(:product_id, :count, :address, :total_price)
+  end
+
+  def cal_total_price(price, count)
+    return price * count  # 商品価格と個数を掛けて合計金額を返す
   end
 end
