@@ -1,57 +1,98 @@
 class OrdersController < ApplicationController
+  before_action :authenticate_user!
+  before_action :set_cart, only: [:new, :confirm, :create]
+
   # 注文履歴一覧
   def index
-    @orders = current_user.orders # ログインしているユーザーの注文一覧を取得
+    @orders = current_user.orders.order(created_at: :desc)
   end
 
   # 注文画面
   def new
-    @order = Order.new 
-    @product = Product.find(params[:product_id])   # URLから商品を取得
+    if @cart.blank? || @cart.cart_items.empty?
+      redirect_to cart_path(@cart || current_user.cart), alert: "カートに商品が入っていません。"
+      return
+    end
+
+    @order = Order.new
+    set_cart_summary
   end
-  
+
   # 注文内容の確認画面
   def confirm
-    @order = Order.new(order_params)          # フォームから送信された注文情報を取得
-    @product = Product.find(order_params[:product_id]) # 注文対象の商品を取得
-    
-    # 【追加】バリデーションチェックの前にログインユーザーを紐付ける
-    @order.user = current_user 
+    if @cart.blank? || @cart.cart_items.empty?
+      redirect_to cart_path(@cart || current_user.cart), alert: "カートに商品が入っていません。"
+      return
+    end
 
-    if @order.valid?
-        @order.total_price = cal_total_price(@product.price, @order.count) # 合計金額を計算して設定
-    else
-      # バリデーションNGなら入力画面に戻る（@productの再取得も行う）
-      render :new and return
+    set_cart_summary
+
+    @order = Order.new(
+      address: order_params[:address],
+      user: current_user,
+      total_price: @cart_total
+    )
+
+    unless @order.valid?
+      render :new, status: :unprocessable_entity
     end
   end
-  
+
   # 注文登録
   def create
-    @order = Order.new(order_params)
-    @order.user_id = current_user.id # ログイン中のユーザーIDを紐付け
-    # 注文が正常に保存できた場合
-    if @order.save
-      redirect_to complete_order_path(@order)     # 登録が完了したら注文完了ページへ遷移
-    else
-      @product = Product.find(@order.product_id)
-      render :new and return # または入力画面へrenderする形に整える
+    if @cart.blank? || @cart.cart_items.empty?
+      redirect_to cart_path(@cart || current_user.cart), alert: "カートに商品が入っていません。"
+      return
     end
+
+    set_cart_summary
+
+    @order = current_user.orders.build(
+      address: order_params[:address],
+      total_price: @cart_total
+    )
+
+    ActiveRecord::Base.transaction do
+      @order.save!
+
+      @cart_items.each do |item|
+        @order.order_details.create!(
+          product_id: item.product.id,
+          quantity: item.quantity,
+          price: item.product.price
+        )
+      end
+
+      @cart.cart_items.destroy_all
+    end
+
+    redirect_to complete_order_path(@order)
+  rescue ActiveRecord::RecordInvalid => e
+    @order.errors.add(:base, e.record.errors.full_messages.join(", ")) if @order.errors.empty?
+    render :new, status: :unprocessable_entity
   end
 
   # 注文完了
   def complete
     @order = Order.find(params[:id])
-    @product = Product.find(@order.product_id)
+    @total_price = @order.total_price || @order.order_details.sum { |d| (d.price || d.product.price) * d.quantity }
   end
 
   private
-  
-  def order_params
-    params.require(:order).permit(:product_id, :count, :address, :total_price)
+
+  def set_cart
+    @cart = current_user.cart
   end
 
-  def cal_total_price(price, count)
-    return price * count  # 商品価格と個数を掛けて合計金額を返す
+  def set_cart_summary
+    @cart_items = @cart.cart_items.includes(:product)
+    @item_totals = @cart_items.map { |item| item.product.price * item.quantity }
+    @cart_total = @item_totals.sum
+    @total_price = @cart_total
+    @order.total_price = @cart_total if @order.present?
+  end
+
+  def order_params
+    params.require(:order).permit(:address)
   end
 end

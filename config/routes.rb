@@ -1,14 +1,24 @@
 Rails.application.routes.draw do
-  get "mypage/show"
   # ユーザ認証
   devise_for :users
 
   # マイページ
   resources :mypage, only: [:show]
 
+  # カート関連
+  resources :carts, only: [:show, :index] do
+    collection do
+      post :add_product # カートに商品を追加（add_product_carts_path）
+    end
+    member do
+      delete :remove_item # カートから商品を削除（remove_item_cart_path）
+      patch :update_quantity # カート内の商品数を変更（update_quantity_cart_path）
+    end
+  end
+
   # 商品登録
   get 'products/new', to: 'products#new', as: 'new_product'
-  post 'products', to: 'products#create'  # 登録
+  post 'products', to: 'products#create'
 
   # 商品一覧
   get 'products', to: 'products#index'
@@ -26,23 +36,20 @@ Rails.application.routes.draw do
   # トップページ
   root to: "homes#top"
 
-   # 注文関連
-  resources :orders, only: [:index, :new, :create] do 
+  # 注文関連
+  resources :orders, only: [:index, :new, :create] do
     collection do
-      post :confirm   # 注文確認
+      post :confirm
     end
 
     member do
-      get :complete  # 注文完了
+      get :complete
     end
   end
 
-  # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
-
-  # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
-  # Can be used by load balancers and uptime monitors to verify that the app is live.
+  # ヘルスチェック
   get "up" => "rails/health#show", as: :rails_health_check
 
-  # Defines the root path route ("/")
-  # root "posts#index"
+  # ユーザーのカート内の商品操作
+  resources :cart_items, only: [:create, :update, :destroy]
 end
